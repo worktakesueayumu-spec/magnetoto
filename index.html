@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>AR 磁界可視化</title>
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+</head>
+
+<body style="margin: 0; overflow: hidden;">
+    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
+        
+        <a-marker preset="hiro" id="n-pole">
+            <a-sphere radius="0.2" color="red"></a-sphere>
+            <a-text value="N" align="center" position="0 0.5 0" color="white"></a-text>
+        </a-marker>
+
+        <a-marker preset="kanji" id="s-pole">
+            <a-sphere radius="0.2" color="blue"></a-sphere>
+            <a-text value="S" align="center" position="0 0.5 0" color="white"></a-text>
+        </a-marker>
+
+        <a-entity id="magnetic-field"></a-entity>
+
+        <a-entity camera></a-entity>
+    </a-scene>
+
+    <script>
+        // ここに「磁力線を計算して描画する」命令を後で書き足します
+        // 今はまず、カメラにマーカーが映るか確認するための準備です
+    </script>
+</body>
+</html>
