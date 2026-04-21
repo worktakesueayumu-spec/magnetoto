@@ -2,70 +2,57 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>AR磁力線シミュレーター</title>
+    <title>AR磁力線テスト</title>
     <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
 </head>
 <body style="margin: 0; overflow: hidden;">
-    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
+    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false; detectionMode: mono_and_matrix; matrixCodeType: 3x3;">
+        
         <a-marker preset="hiro" id="n-pole">
-            <a-sphere radius="0.2" color="#FF0000"></a-sphere>
-            <a-text value="N" align="center" position="0 0.5 0"></a-text>
+            <a-sphere radius="0.2" color="red"></a-sphere>
         </a-marker>
 
         <a-marker preset="kanji" id="s-pole">
-            <a-sphere radius="0.2" color="#0000FF"></a-sphere>
-            <a-text value="S" align="center" position="0 0.5 0"></a-text>
+            <a-sphere radius="0.2" color="blue"></a-sphere>
         </a-marker>
 
-        <a-entity id="field-container"></a-entity>
+        <a-entity id="iron-field" position="0 0 -5"></a-entity>
 
         <a-entity camera></a-entity>
     </a-scene>
 
     <script>
-        const container = document.getElementById('field-container');
-        const nMarker = document.getElementById('n-pole');
-        const sMarker = document.getElementById('s-pole');
-
-        // 砂鉄の粒を100個作成する
-        const numGrains = 100;
+        const field = document.getElementById('iron-field');
         const grains = [];
 
-        for (let i = 0; i < numGrains; i++) {
-            const grain = document.createElement('a-entity');
-            // 砂鉄を小さな「線」として表現
-            grain.setAttribute('geometry', {primitive: 'box', width: 0.01, height: 0.1, depth: 0.01});
-            grain.setAttribute('material', {color: '#333333'}); // 砂鉄っぽい色
-            container.appendChild(grain);
-            grains.push(grain);
+        // 1. 砂鉄の粒を空中にグリッド状に並べる
+        for (let x = -2; x <= 2; x += 0.5) {
+            for (let y = -2; y <= 2; y += 0.5) {
+                const grain = document.createElement('a-box');
+                grain.setAttribute('width', '0.02');
+                grain.setAttribute('height', '0.2');
+                grain.setAttribute('depth', '0.02');
+                grain.setAttribute('color', 'black');
+                grain.setAttribute('position', {x: x, y: y, z: 0});
+                field.appendChild(grain);
+                grains.push(grain);
+            }
         }
 
-        // 毎秒60回、磁界を計算して砂鉄を動かす
-        setInterval(() => {
-            const nPos = nMarker.object3D.position;
-            const sPos = sMarker.object3D.position;
-
-            // マーカーが見えている時だけ計算する
-            if (nMarker.visible && sMarker.visible) {
-                grains.forEach((grain, i) => {
-                    // 砂鉄をランダムな位置に配置（とりあえず2つの磁石の間に散らす）
-                    const ratio = i / numGrains;
-                    const targetX = nPos.x + (sPos.x - nPos.x) * ratio + (Math.random() - 0.5) * 0.5;
-                    const targetY = nPos.y + (sPos.y - nPos.y) * ratio + (Math.random() - 0.5) * 0.5;
-                    const targetZ = nPos.z + (sPos.z - nPos.z) * ratio + (Math.random() - 0.5) * 0.5;
-
-                    grain.setAttribute('position', {x: targetX, y: targetY, z: targetZ});
-                    
-                    // 磁石の向きに合わせて砂鉄を回転させる（簡易版）
-                    grain.setAttribute('rotation', {
-                        x: 0, 
-                        y: 0, 
-                        z: Math.atan2(sPos.y - nPos.y, sPos.x - nPos.x) * 180 / Math.PI
-                    });
+        // 2. 磁石の位置に合わせて向きを変える（簡易版）
+        const nMarker = document.getElementById('n-pole');
+        
+        function update() {
+            // マーカーが見つかったら、砂鉄がそっちを向くようにする
+            if (nMarker.object3D.visible) {
+                grains.forEach(g => {
+                    g.setAttribute('color', 'orange'); // 見つかったら色を変えて合図
                 });
             }
-        }, 100);
+            requestAnimationFrame(update);
+        }
+        update();
     </script>
 </body>
 </html>
