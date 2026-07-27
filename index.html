@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>AR 磁力線アプリ</title>
+  <!-- 3Dを描くライブラリ(A-Frame)と、カメラで認識するライブラリ(AR.js)を読み込み -->
+  <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+  
+  <script>
+    // 磁力線を計算して立体的に描くプログラム
+    AFRAME.registerComponent('magnetic-field', {
+      init: function () {
+        this.nEl = document.querySelector('#n-pole');
+        this.sEl = document.querySelector('#s-pole');
+        this.linesContainer = document.querySelector('#lines-container');
+        
+        // 磁力線の数（8本の線を立体的に渡します）
+        this.numLines = 8;
+        this.lines = [];
+
+        for (let i = 0; i < this.numLines; i++) {
+          let line = document.createElement('a-entity');
+          this.linesContainer.appendChild(line);
+          this.lines.push({
+            entity: line,
+            angle: (i / this.numLines) * Math.PI * 2
+          });
+        }
+      },
+      tick: function () {
+        // 2つのマーカー（N極・S極）が両方画面に映っている時だけ描画
+        if (this.nEl.object3D.visible && this.sEl.object3D.visible) {
+          let nPos = new THREE.Vector3();
+          let sPos = new THREE.Vector3();
+          
+          this.nEl.object3D.getWorldPosition(nPos);
+          this.sEl.object3D.getWorldPosition(sPos);
+
+          let distance = nPos.distanceTo(sPos);
+
+          this.lines.forEach(item => {
+            // N極とS極の中間地点を計算
+            let mid = new THREE.Vector3().addVectors(nPos, sPos).multiplyScalar(0.5);
+            
+            // 磁力線が外側にふんわり膨らむような3Dカーブの地点を計算
+            let offsetR = distance * 0.4;
+            let offsetX = Math.cos(item.angle) * offsetR;
+            let offsetZ = Math.sin(item.angle) * offsetR;
+            
+            let controlPoint = new THREE.Vector3(
+              mid.x + offsetX,
+              mid.y + distance * 0.3,
+              mid.z + offsetZ
+            );
+
+            // N極からS極へのきれいな曲線を作成
+            let curve = new THREE.QuadraticBezierCurve3(nPos, controlPoint, sPos);
+            let points = curve.getPoints(20);
+            
+            // 水色の線として描画
+            let geometry = new THREE.BufferGeometry().setFromPoints(points);
+            let material = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 3 });
+            
+            let lineMesh = new THREE.Line(geometry, material);
+            
+            // 前のフレームの線を消して新しい線に更新（滑らかに追従させるため）
+            if (item.mesh) item.entity.object3D.remove(item.mesh);
+            item.mesh = lineMesh;
+            item.entity.object3D.add(lineMesh);
+          });
+        }
+      }
+    });
+  </script>
+</head>
+<body style="margin: 0; overflow: hidden;">
+  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
+    <!-- N極用マーカー (Hiro) -->
+    <a-marker id="n-pole" preset="hiro">
+      <a-sphere radius="0.1" color="red"></a-sphere>
+      <a-text value="N" position="0 0.2 0" align="center" color="white"></a-text>
+    </a-marker>
+
+    <!-- S極用マーカー (Kanji) -->
+    <a-marker id="s-pole" preset="kanji">
+      <a-sphere radius="0.1" color="blue"></a-sphere>
+      <a-text value="S" position="0 0.2 0" align="center" color="white"></a-text>
+    </a-marker>
+
+    <!-- 磁力線を空間に配置 -->
+    <a-entity magnetic-field id="lines-container"></a-entity>
+
+    <a-entity camera></a-entity>
+  </a-scene>
+</body>
+</html>
