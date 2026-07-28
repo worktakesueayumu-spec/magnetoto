@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>AR リアル磁力線シミュレータ (対称・遠近感強化)</title>
+  <title>AR リアル磁力線シミュレータ</title>
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
   
@@ -13,16 +13,13 @@
         this.sEl = document.querySelector('#s-pole');
         this.linesContainer = document.querySelector('#lines-container');
         
-        // 磁力線の数は8本に戻す
         this.numLines = 8;
         this.segments = 20; 
         this.lines = [];
-        this.cameraEl = document.querySelector('[camera]');
 
         for (let i = 0; i < this.numLines; i++) {
           let line = document.createElement('a-entity');
-          // 初期材質（色、透明化可能、フォグ適用）を設定
-          line.setAttribute('material', 'color: cyan; metalness: 0.3; roughness: 0.7; transparent: true; opacity: 1; fog: true');
+          line.setAttribute('material', 'color: cyan; metalness: 0.3; roughness: 0.7; transparent: true; opacity: 1;');
           this.linesContainer.appendChild(line);
           this.lines.push({
             entity: line,
@@ -31,72 +28,54 @@
         }
       },
       tick: function () {
+        // マーカーとカメラが存在するか安全に確認
+        if (!this.nEl || !this.sEl) return;
+        
         if (this.nEl.object3D.visible && this.sEl.object3D.visible) {
           let nPos = new THREE.Vector3();
           let sPos = new THREE.Vector3();
-          let camPos = new THREE.Vector3();
           
           this.nEl.object3D.getWorldPosition(nPos);
           this.sEl.object3D.getWorldPosition(sPos);
-          this.cameraEl.object3D.getWorldPosition(camPos);
+
+          // カメラの座標を取得（エラー防止用ガード付き）
+          let camPos = new THREE.Vector3();
+          if (this.el.sceneEl.camera) {
+            this.el.sceneEl.camera.getWorldPosition(camPos);
+          }
 
           let dirNS = new THREE.Vector3().subVectors(sPos, nPos);
           let distance = dirNS.length();
+          if (distance === 0) return; // 0除算防止
           dirNS.normalize();
 
-          // 【修正 1&2】出入り口：外側のオフセットを大幅に縮小（5%）して中央寄りに
+          // マーカーのすぐ端から出入り（5%オフセット）
           let poleOffsetDistance = distance * 0.05; 
           let nStartPos = new THREE.Vector3().addVectors(nPos, dirNS.clone().multiplyScalar(-poleOffsetDistance));
           let sEndPos = new THREE.Vector3().addVectors(sPos, dirNS.clone().multiplyScalar(poleOffsetDistance));
 
-          // N極の姿勢（クォータニオン）を取得
           let q = new THREE.Quaternion();
           this.nEl.object3D.getWorldQuaternion(q);
           
           this.lines.forEach(item => {
-            // N極からS極への中心
             let mid = new THREE.Vector3().addVectors(nStartPos, sEndPos).multiplyScalar(0.5);
             let perpVector = new THREE.Vector3(Math.cos(item.angle), Math.sin(item.angle), 0).applyQuaternion(q);
             
-            // 【修正 4】遠回り距離を縮小（0.6倍）。外膨らみさせつつ近くを通る
             let offsetR = distance * 0.6;
             let midControlPoint = new THREE.Vector3().addVectors(mid, perpVector.multiplyScalar(offsetR));
 
-            // 【修正 3】Catmull-Rom曲線で起点、補助点（遠回り）、終点を滑らかに対称に結ぶ
-            let curve = new THREE.CatmullRomCurve3([
-              nStartPos,
-              midControlPoint,
-              sEndPos
-            ]);
-            
-            // 曲線の中央点を取得（カメラとの距離計算用）
+            let curve = new THREE.CatmullRomCurve3([nStartPos, midControlPoint, sEndPos]);
             let curveCenter = curve.getPoint(0.5);
             
-            // 【修正 5】観測者からの遠近感（太さと薄さ）
-            // カメラと線の中心との距離を計算
+            // 遠近感（太さと透明度）の計算
             let distToCam = curveCenter.distanceTo(camPos);
+            let t = THREE.MathUtils.clamp((distToCam - distance * 0.5) / (distance * 1.5), 0, 1);
             
-            // 距離に基づいて、太さ（radius）と透明度（opacity）を計算
-            // （基準距離 0.5〜2.5 の範囲で調整）
-            let minRadius = 0.005; // 遠い時の太さ
-            let maxRadius = 0.02;  // 近い時の太さ
-            let minOpacity = 0.1;   // 遠い時の薄さ
-            let maxOpacity = 1.0;   // 近い時の濃さ
+            let tubeRadius = THREE.MathUtils.lerp(0.018, 0.005, t);
+            let tubeOpacity = THREE.MathUtils.lerp(1.0, 0.2, t);
             
-            // 距離による係数（0〜1）を計算
-            let farDist = distance * 2.0; // 磁石の長さの2倍を「遠い」の基準に
-            let nearDist = distance * 0.5; // 磁石の長さの0.5倍を「近い」の基準に
-            let t = (distToCam - nearDist) / (farDist - nearDist);
-            t = THREE.MathUtils.clamp(t, 0, 1); // 0〜1の範囲に固定
-            
-            // 係数tを使って、太さと透明度を補間（t=1なら遠い、t=0なら近い）
-            let tubeRadius = THREE.MathUtils.lerp(maxRadius, minRadius, t);
-            let tubeOpacity = THREE.MathUtils.lerp(maxOpacity, minOpacity, t);
-            
-            // チューブを生成
             let geometry = new THREE.TubeGeometry(curve, this.segments, tubeRadius, 6, false);
             
-            // 材質の透明度（opacity）を更新
             item.entity.object3DMap.material.opacity = tubeOpacity;
             
             if (item.mesh) item.entity.object3D.remove(item.mesh);
@@ -109,22 +88,18 @@
   </script>
 </head>
 <body style="margin: 0; overflow: hidden;">
-  <!-- フォグを少し薄くして（0.1）遠近感の調整を主にコード側で行う -->
-  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" fog="type: exponential; color: #fff; density: 0.1">
+  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" fog="type: exponential; color: #fff; density: 0.08">
     
-    <!-- N極（Hiro） -->
     <a-marker id="n-pole" preset="hiro">
       <a-sphere radius="0.08" color="red"></a-sphere>
       <a-text value="N" position="0 0.2 0" align="center" color="white"></a-text>
     </a-marker>
 
-    <!-- S極（Kanji） -->
     <a-marker id="s-pole" preset="kanji">
       <a-sphere radius="0.08" color="blue"></a-sphere>
       <a-text value="S" position="0 0.2 0" align="center" color="white"></a-text>
     </a-marker>
 
-    <!-- 磁力線コンテナ -->
     <a-entity magnetic-field id="lines-container"></a-entity>
     
     <a-entity ambient-light="color: #888"></a-entity>
