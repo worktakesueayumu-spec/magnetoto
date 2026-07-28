@@ -2,8 +2,8 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>AR 立体磁力線シミュレータ (遠回り版)</title>
-  <!-- A-Frame and AR.js libraries -->
+  <title>AR 磁力線アプリ</title>
+  <!-- 3Dを描くライブラリ(A-Frame)と、カメラで認識するライブラリ(AR.js)を読み込み -->
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
   
@@ -14,9 +14,8 @@
         this.sEl = document.querySelector('#s-pole');
         this.linesContainer = document.querySelector('#lines-container');
         
-        // 磁力線の数と、各線の分割数（滑らかさ）
-        this.numLines = 10; // ほわっと感を出すために少し増やします
-        this.segments = 50; 
+        // 磁力線の数（12本にしてより綺麗な立体的に）
+        this.numLines = 12;
         this.lines = [];
 
         for (let i = 0; i < this.numLines; i++) {
@@ -29,7 +28,7 @@
         }
       },
       tick: function () {
-        // 両方のマーカーが可視の場合のみ
+        // 2つのマーカー（N極・S極）が両方画面に映っている時だけ描画
         if (this.nEl.object3D.visible && this.sEl.object3D.visible) {
           let nPos = new THREE.Vector3();
           let sPos = new THREE.Vector3();
@@ -37,46 +36,43 @@
           this.nEl.object3D.getWorldPosition(nPos);
           this.sEl.object3D.getWorldPosition(sPos);
 
-          let distance = nPos.distanceTo(sPos);
+          // N極からS極へのベクトルと距離
+          let dir = new THREE.Vector3().subVectors(sPos, nPos);
+          let distance = dir.length();
+          if (distance === 0) return;
+
+          // 中間地点（真ん中）
+          let mid = new THREE.Vector3().addVectors(nPos, sPos).multiplyScalar(0.5);
+
+          // N-S軸に垂直な平面上の2つの直交基底(u, v)を計算（完全な点対称・線対称を作るため）
+          let normDir = dir.clone().normalize();
+          let up = Math.abs(normDir.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+          let u = new THREE.Vector3().crossVectors(normDir, up).normalize();
+          let v = new THREE.Vector3().crossVectors(normDir, u).normalize();
+
+          // 磁力線の膨らみの大きさ（距離に応じて変化）
+          let radius = distance * 0.35;
 
           this.lines.forEach(item => {
-            // N極とS極の中心地点
-            let mid = new THREE.Vector3().addVectors(nPos, sPos).multiplyScalar(0.5);
-            
-            // 磁力線が大きく外側へ回り込むための制御点を計算
-            // 軸周りにループさせ、さらに上下（y軸）へ大きく膨らませる
-            let offsetR = distance * 0.8; // 回り込む半径を大きく設定
-            let offsetX = Math.cos(item.angle) * offsetR;
-            let offsetZ = Math.sin(item.angle) * offsetR;
-            
-            // N極からS極へ繋ぐ「S字」のような3D曲線（三次ベジェ曲線）の制御点1
-            let controlPoint1 = new THREE.Vector3(
-              mid.x + offsetX,
-              mid.y + distance * 0.6, // 上方向へ大きく膨らませる
-              mid.z + offsetZ
-            );
-            
-            // S字のような3D曲線（三次ベジェ曲線）の制御点2（N極側とは逆へ膨らませる）
-            let controlPoint2 = new THREE.Vector3(
-              mid.x - offsetX,
-              mid.y + distance * 0.1, // こちらは少し戻す
-              mid.z - offsetZ
-            );
+            // N-S軸を中心に円状に等間隔配置
+            let offsetX = Math.cos(item.angle) * radius;
+            let offsetY = Math.sin(item.angle) * radius;
 
-            // 【ここを修正】より遠回りする「三次ベジェ曲線」に変更
-            let curve = new THREE.CubicBezierCurve3(nPos, controlPoint1, controlPoint2, sPos);
-            let points = curve.getPoints(this.segments);
+            // 中間点から垂直方向に押し出した制御点
+            let controlPoint = mid.clone()
+              .add(u.clone().multiplyScalar(offsetX))
+              .add(v.clone().multiplyScalar(offsetY));
+
+            // N極から制御点を経由してS極へ向かう美しいベジェ曲線
+            let curve = new THREE.QuadraticBezierCurve3(nPos, controlPoint, sPos);
+            let points = curve.getPoints(24);
             
-            // 線を3Dチューブ（パイプ）として描画（遠近感を出すため）
-            // 遠くに行くほど細く見せるために Tube を使います
-            let geometry = new THREE.TubeGeometry(curve, this.segments, 0.015, 8, false);
+            // 線の描画
+            let geometry = new THREE.BufferGeometry().setFromPoints(points);
+            let material = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 3 });
             
-            // 材質を設定：光沢を抑え、少し半透明にして「ほわっと」させる
-            let material = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.6, wireframe: false });
+            let lineMesh = new THREE.Line(geometry, material);
             
-            let lineMesh = new THREE.Mesh(geometry, material);
-            
-            // 既存のメッシュを更新
             if (item.mesh) item.entity.object3D.remove(item.mesh);
             item.mesh = lineMesh;
             item.entity.object3D.add(lineMesh);
@@ -87,19 +83,17 @@
   </script>
 </head>
 <body style="margin: 0; overflow: hidden;">
-  <!-- シーン全体にフォグ（霧）を追加して、遠くの線を薄く見せる設定 -->
-  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" fog="type: linear; color: #aaa; near: 1; far: 5">
-    
-    <!-- N極マーカー（Hiro） -->
+  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
+    <!-- N極用マーカー (Hiro) -->
     <a-marker id="n-pole" preset="hiro">
-      <a-sphere radius="0.1" color="red"></a-sphere>
-      <a-text value="N" position="0 0.2 0" align="center" color="white"></a-text>
+      <a-sphere radius="0.08" color="#ff3333"></a-sphere>
+      <a-text value="N" position="0 0.15 0" align="center" color="white" scale="1.5 1.5 1.5"></a-text>
     </a-marker>
 
-    <!-- S極マーカー（Kanji） -->
+    <!-- S極用マーカー (Kanji) -->
     <a-marker id="s-pole" preset="kanji">
-      <a-sphere radius="0.1" color="blue"></a-sphere>
-      <a-text value="S" position="0 0.2 0" align="center" color="white"></a-text>
+      <a-sphere radius="0.08" color="#3366ff"></a-sphere>
+      <a-text value="S" position="0 0.15 0" align="center" color="white" scale="1.5 1.5 1.5"></a-text>
     </a-marker>
 
     <!-- 磁力線を空間に配置 -->
