@@ -2,8 +2,8 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>AR リアル対称磁場シミュレータ</title>
-  <!-- A-Frame and AR.js -->
+  <title>AR 科学的・立体磁力線シミュレータ</title>
+  <!-- A-Frame and AR.js libraries -->
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
   
@@ -14,16 +14,15 @@
         this.sEl = document.querySelector('#s-pole');
         this.linesContainer = document.querySelector('#lines-container');
         
-        // 【ご指示通りの修正 1】
-        // 線を8本に固定
-        this.numLines = 8; 
-        this.segments = 30; // 曲線分割数は滑らかさのために維持
+        // 磁力線の数と、各線の分割数（チューブを滑らかにするため）
+        this.numLines = 8;
+        this.segments = 20; 
         this.lines = [];
 
         for (let i = 0; i < this.numLines; i++) {
           let line = document.createElement('a-entity');
-          // 材質（色、光沢、透明度）を設定。初期値は不透明。
-          line.setAttribute('material', 'color: cyan; metalness: 0.3; roughness: 0.7; transparent: true; opacity: 1.0;');
+          // チューブの材質（色、光沢）を設定
+          line.setAttribute('material', 'color: cyan; metalness: 0.3; roughness: 0.7;');
           this.linesContainer.appendChild(line);
           this.lines.push({
             entity: line,
@@ -36,76 +35,42 @@
         if (this.nEl.object3D.visible && this.sEl.object3D.visible) {
           let nPos = new THREE.Vector3();
           let sPos = new THREE.Vector3();
-          let camPos = new THREE.Vector3();
           
           this.nEl.object3D.getWorldPosition(nPos);
           this.sEl.object3D.getWorldPosition(sPos);
-          // カメラの位置を取得
-          document.querySelector('[camera]').object3D.getWorldPosition(camPos);
 
-          // N極からS極に向かうベクトル
-          let dirNS = new THREE.Vector3().subVectors(sPos, nPos);
-          let distance = dirNS.length();
-          dirNS.normalize(); // 単位ベクトル化
+          // N極からS極へのベクトル
+          let vectorNS = new THREE.Vector3().subVectors(sPos, nPos);
+          let distance = vectorNS.length();
 
-          // 【ご指示通りの修正 2】
-          // マーカー間距離の10%（以前の25%より短く）中央に寄せるオフセット量
-          let poleOffsetDistance = distance * 0.10; 
-
-          // 磁力線の起点：N極マーカーから「中央（S極向き）」に寄せる
-          let nStartPos = new THREE.Vector3().addVectors(nPos, dirNS.clone().multiplyScalar(poleOffsetDistance));
+          // 【科学的修正】N極の回転情報を取得して、磁力線の制御点を磁石軸基準で計算
+          let q = new THREE.Quaternion();
+          this.nEl.object3D.getWorldQuaternion(q);
           
-          // 磁力線の終点：S極マーカーから「中央（N極向き）」に寄せる
-          let sEndPos = new THREE.Vector3().addVectors(sPos, dirNS.clone().multiplyScalar(-poleOffsetDistance));
-
-          // 【ご指示通りの修正 3】
-          // 完璧な左右対称性を確保するため、磁石軸（dirNS）に基づく制御点計算
-          let mid = new THREE.Vector3().addVectors(nStartPos, sEndPos).multiplyScalar(0.5);
-
-          // 磁石軸（dirNS）に垂直な任意のベクトル（例えば、真上ベクトル）
-          let perpBase = new THREE.Vector3(0, 1, 0);
-          // 磁石軸と真上ベクトルが平行な場合の回避
-          if (Math.abs(perpBase.dot(dirNS)) > 0.999) perpBase = new THREE.Vector3(1, 0, 0); 
-          // 磁石軸と垂直なベクトルを計算
-          let perpVector1 = new THREE.Vector3().crossVectors(dirNS, perpBase).normalize();
-          let perpVector2 = new THREE.Vector3().crossVectors(dirNS, perpVector1).normalize();
-
           this.lines.forEach(item => {
-            // 円周上に制御点を配置
-            let controlPointDir = perpVector1.clone().multiplyScalar(Math.cos(item.angle))
-                                       .add(perpVector2.clone().multiplyScalar(Math.sin(item.angle)));
+            // N極からS極への中心地点
+            let mid = new THREE.Vector3().addVectors(nPos, sPos).multiplyScalar(0.5);
             
-            // 制御点の膨らみ（距離に比例、以前の1.2倍より小さく）
-            let offsetR = distance * 0.8; 
-            let controlPoint = new THREE.Vector3().addVectors(mid, controlPointDir.multiplyScalar(offsetR));
-
-            // 二次ベジェ曲線（完璧に対称）を作成
-            let curve = new THREE.QuadraticBezierCurve3(nStartPos, controlPoint, sEndPos);
+            // 磁石軸に対する垂直方向を計算（N極の回転を考慮）
+            // これで、磁石を傾けても常に磁石を囲むように膨らむ
+            let perpVector = new THREE.Vector3(Math.cos(item.angle), Math.sin(item.angle), 0).applyQuaternion(q);
             
-            // 【ご指示通りの修正 4】
-            // カメラからの距離を計算
-            let midPoint = mid.clone();
-            let distanceToCamera = midPoint.distanceTo(camPos);
+            // 制御点の膨らみ（距離に比例、最大値を設定）
+            let offsetR = Math.min(distance * 0.4, 0.5);
+            
+            // 制御点を計算（N極基準で対称に配置）
+            let controlPoint = new THREE.Vector3().addVectors(mid, perpVector.multiplyScalar(offsetR));
 
-            // 距離に基づいて太さを計算（手前は太く、奥は細く）
-            // 係数を調整（0.02 - 0.005の間で変化させるなど）
-            let baseRadius = 0.015;
-            let radius = Math.max(0.005, baseRadius - (distanceToCamera * 0.005)); 
-
-            // 距離に基づいて透明度を計算（手前は濃く、奥は薄く）
-            // 係数を調整（1.0 - 0.2の間で変化させるなど）
-            let opacity = Math.max(0.2, 1.0 - (distanceToCamera * 0.15));
-
-            // チューブ状（3Dパイプ）で描画
-            let geometry = new THREE.TubeGeometry(curve, this.segments, radius, 8, false);
+            // 二次ベジェ曲線（きれいな対称カーブ）を生成
+            let curve = new THREE.QuadraticBezierCurve3(nPos, controlPoint, sPos);
+            let points = curve.getPoints(this.segments);
+            
+            // 【遠近感修正】チューブ状の立体（パイプ）として描画
+            let geometry = new THREE.TubeGeometry(curve, this.segments, 0.015, 8, false);
             
             // 既存のメッシュを更新
             if (item.mesh) item.entity.object3D.remove(item.mesh);
             item.mesh = new THREE.Mesh(geometry, item.entity.object3DMap.material);
-            
-            // 透明度を反映
-            item.entity.object3DMap.material.opacity = opacity;
-
             item.entity.object3D.add(item.mesh);
           });
         }
@@ -114,25 +79,25 @@
   </script>
 </head>
 <body style="margin: 0; overflow: hidden;">
-  <!-- フォグ（霧）設定は維持。色はシーンに合わせて調整可能（例：white） -->
-  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" fog="type: exponential; color: white; density: 0.10">
+  <!-- 【遠近感修正】fog（霧）を追加して、奥を薄く見せる設定 -->
+  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" fog="type: exponential; color: white; density: 0.15">
     
     <!-- N極マーカー（Hiro） -->
     <a-marker id="n-pole" preset="hiro">
-      <a-sphere radius="0.08" color="red"></a-sphere>
+      <a-sphere radius="0.1" color="red"></a-sphere>
       <a-text value="N" position="0 0.2 0" align="center" color="white"></a-text>
     </a-marker>
 
     <!-- S極マーカー（Kanji） -->
     <a-marker id="s-pole" preset="kanji">
-      <a-sphere radius="0.08" color="blue"></a-sphere>
+      <a-sphere radius="0.1" color="blue"></a-sphere>
       <a-text value="S" position="0 0.2 0" align="center" color="white"></a-text>
     </a-marker>
 
     <!-- 磁力線のコンテナ -->
     <a-entity magnetic-field id="lines-container"></a-entity>
     
-    <!-- 照明 -->
+    <!-- 【遠近感修正】ライトを追加して立体感を強調 -->
     <a-entity ambient-light="color: #666"></a-entity>
     <a-entity directional-light="color: #fff; intensity: 0.6" position="0 1 1"></a-entity>
 
