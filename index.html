@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>AR リアル磁力線シミュレータ</title>
+  <title>AR リアル磁力線シミュレータ (修正版)</title>
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
   
@@ -14,7 +14,7 @@
         this.linesContainer = document.querySelector('#lines-container');
         
         this.numLines = 8;
-        this.segments = 20; 
+        this.segments = 16; 
         this.lines = [];
 
         for (let i = 0; i < this.numLines; i++) {
@@ -28,9 +28,10 @@
         }
       },
       tick: function () {
-        // マーカーとカメラが存在するか安全に確認
+        // 安全チェック：エレメントが存在しない場合は何もしない
         if (!this.nEl || !this.sEl) return;
         
+        // N極・S極の両方が画面に映っている時のみ計算を実行
         if (this.nEl.object3D.visible && this.sEl.object3D.visible) {
           let nPos = new THREE.Vector3();
           let sPos = new THREE.Vector3();
@@ -38,22 +39,23 @@
           this.nEl.object3D.getWorldPosition(nPos);
           this.sEl.object3D.getWorldPosition(sPos);
 
-          // カメラの座標を取得（エラー防止用ガード付き）
+          // カメラ位置の安全な取得
           let camPos = new THREE.Vector3();
-          if (this.el.sceneEl.camera) {
+          if (this.el.sceneEl && this.el.sceneEl.camera) {
             this.el.sceneEl.camera.getWorldPosition(camPos);
           }
 
           let dirNS = new THREE.Vector3().subVectors(sPos, nPos);
           let distance = dirNS.length();
-          if (distance === 0) return; // 0除算防止
+          if (distance < 0.01) return; // 距離が近すぎる場合のエラー防止
           dirNS.normalize();
 
-          // マーカーのすぐ端から出入り（5%オフセット）
+          // マーカーの端スレスレから出入り（5%オフセット）
           let poleOffsetDistance = distance * 0.05; 
           let nStartPos = new THREE.Vector3().addVectors(nPos, dirNS.clone().multiplyScalar(-poleOffsetDistance));
           let sEndPos = new THREE.Vector3().addVectors(sPos, dirNS.clone().multiplyScalar(poleOffsetDistance));
 
+          // N極の回転（クォータニオン）を取得
           let q = new THREE.Quaternion();
           this.nEl.object3D.getWorldQuaternion(q);
           
@@ -61,25 +63,34 @@
             let mid = new THREE.Vector3().addVectors(nStartPos, sEndPos).multiplyScalar(0.5);
             let perpVector = new THREE.Vector3(Math.cos(item.angle), Math.sin(item.angle), 0).applyQuaternion(q);
             
-            let offsetR = distance * 0.6;
-            let midControlPoint = new THREE.Vector3().addVectors(mid, perpVector.multiplyScalar(offsetR));
+            // 適度な遠回り（マーカー間の0.5倍膨らませる）
+            let offsetR = distance * 0.5;
+            let controlPoint = new THREE.Vector3().addVectors(mid, perpVector.multiplyScalar(offsetR));
 
-            let curve = new THREE.CatmullRomCurve3([nStartPos, midControlPoint, sEndPos]);
+            // 安全な2次ベジェ曲線を作成（左右対称な弧を描く）
+            let curve = new THREE.QuadraticBezierCurve3(nStartPos, controlPoint, sEndPos);
             let curveCenter = curve.getPoint(0.5);
             
-            // 遠近感（太さと透明度）の計算
+            // 観測者（カメラ）からの遠近感（太さと透明度）の補間計算
             let distToCam = curveCenter.distanceTo(camPos);
             let t = THREE.MathUtils.clamp((distToCam - distance * 0.5) / (distance * 1.5), 0, 1);
             
-            let tubeRadius = THREE.MathUtils.lerp(0.018, 0.005, t);
-            let tubeOpacity = THREE.MathUtils.lerp(1.0, 0.2, t);
+            let tubeRadius = THREE.MathUtils.lerp(0.015, 0.005, t); // 近いと太く、遠いと細く
+            let tubeOpacity = THREE.MathUtils.lerp(1.0, 0.25, t);  // 近いと濃く、遠いと薄く
             
-            let geometry = new THREE.TubeGeometry(curve, this.segments, tubeRadius, 6, false);
+            // チューブ作成（セグメント数を抑えて軽量化）
+            let geometry = new THREE.TubeGeometry(curve, this.segments, tubeRadius, 5, false);
             
-            item.entity.object3DMap.material.opacity = tubeOpacity;
+            // 既存のメッシュを安全に差替
+            if (item.mesh) {
+              item.entity.object3D.remove(item.mesh);
+              item.mesh.geometry.dispose(); // メモリ解放
+            }
             
-            if (item.mesh) item.entity.object3D.remove(item.mesh);
-            item.mesh = new THREE.Mesh(geometry, item.entity.object3DMap.material);
+            let mat = item.entity.object3DMap.material.clone();
+            mat.opacity = tubeOpacity;
+            
+            item.mesh = new THREE.Mesh(geometry, mat);
             item.entity.object3D.add(item.mesh);
           });
         }
@@ -88,18 +99,21 @@
   </script>
 </head>
 <body style="margin: 0; overflow: hidden;">
-  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" fog="type: exponential; color: #fff; density: 0.08">
+  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
     
+    <!-- N極（Hiroマーカー） -->
     <a-marker id="n-pole" preset="hiro">
       <a-sphere radius="0.08" color="red"></a-sphere>
       <a-text value="N" position="0 0.2 0" align="center" color="white"></a-text>
     </a-marker>
 
+    <!-- S極（Kanjiマーカー） -->
     <a-marker id="s-pole" preset="kanji">
       <a-sphere radius="0.08" color="blue"></a-sphere>
       <a-text value="S" position="0 0.2 0" align="center" color="white"></a-text>
     </a-marker>
 
+    <!-- 磁力線を描画するエンティティ -->
     <a-entity magnetic-field id="lines-container"></a-entity>
     
     <a-entity ambient-light="color: #888"></a-entity>
