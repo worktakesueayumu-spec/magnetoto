@@ -2,25 +2,27 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>AR 磁力線アプリ</title>
-  <!-- 3Dを描くライブラリ(A-Frame)と、カメラで認識するライブラリ(AR.js)を読み込み -->
+  <title>まぐねとと</title>
+  <!-- A-Frame and AR.js libraries -->
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
   
   <script>
-    // 磁力線を計算して立体的に描くプログラム
     AFRAME.registerComponent('magnetic-field', {
       init: function () {
         this.nEl = document.querySelector('#n-pole');
         this.sEl = document.querySelector('#s-pole');
         this.linesContainer = document.querySelector('#lines-container');
         
-        // 磁力線の数（8本の線を立体的に渡します）
+        // 磁力線の数と、各線の分割数（チューブを滑らかにするため）
         this.numLines = 8;
+        this.segments = 20; 
         this.lines = [];
 
         for (let i = 0; i < this.numLines; i++) {
           let line = document.createElement('a-entity');
+          // チューブの材質（色、光沢）を設定
+          line.setAttribute('material', 'color: cyan; metalness: 0.3; roughness: 0.7;');
           this.linesContainer.appendChild(line);
           this.lines.push({
             entity: line,
@@ -29,7 +31,7 @@
         }
       },
       tick: function () {
-        // 2つのマーカー（N極・S極）が両方画面に映っている時だけ描画
+        // 両方のマーカーが可視の場合のみ
         if (this.nEl.object3D.visible && this.sEl.object3D.visible) {
           let nPos = new THREE.Vector3();
           let sPos = new THREE.Vector3();
@@ -37,37 +39,39 @@
           this.nEl.object3D.getWorldPosition(nPos);
           this.sEl.object3D.getWorldPosition(sPos);
 
-          let distance = nPos.distanceTo(sPos);
+          // N極からS極へのベクトル
+          let vectorNS = new THREE.Vector3().subVectors(sPos, nPos);
+          let distance = vectorNS.length();
 
+          // 【科学的修正】N極の回転情報を取得して、磁力線の制御点を磁石軸基準で計算
+          let q = new THREE.Quaternion();
+          this.nEl.object3D.getWorldQuaternion(q);
+          
           this.lines.forEach(item => {
-            // N極とS極の中間地点を計算
+            // N極からS極への中心地点
             let mid = new THREE.Vector3().addVectors(nPos, sPos).multiplyScalar(0.5);
             
-            // 磁力線が外側にふんわり膨らむような3Dカーブの地点を計算
-            let offsetR = distance * 0.4;
-            let offsetX = Math.cos(item.angle) * offsetR;
-            let offsetZ = Math.sin(item.angle) * offsetR;
+            // 磁石軸に対する垂直方向を計算（N極の回転を考慮）
+            // これで、磁石を傾けても常に磁石を囲むように膨らむ
+            let perpVector = new THREE.Vector3(Math.cos(item.angle), Math.sin(item.angle), 0).applyQuaternion(q);
             
-            let controlPoint = new THREE.Vector3(
-              mid.x + offsetX,
-              mid.y + distance * 0.3,
-              mid.z + offsetZ
-            );
+            // 制御点の膨らみ（距離に比例、最大値を設定）
+            let offsetR = Math.min(distance * 0.4, 0.5);
+            
+            // 制御点を計算（N極基準で対称に配置）
+            let controlPoint = new THREE.Vector3().addVectors(mid, perpVector.multiplyScalar(offsetR));
 
-            // N極からS極へのきれいな曲線を作成
+            // 二次ベジェ曲線（きれいな対称カーブ）を生成
             let curve = new THREE.QuadraticBezierCurve3(nPos, controlPoint, sPos);
-            let points = curve.getPoints(20);
+            let points = curve.getPoints(this.segments);
             
-            // 水色の線として描画
-            let geometry = new THREE.BufferGeometry().setFromPoints(points);
-            let material = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 3 });
+            // 【遠近感修正】チューブ状の立体（パイプ）として描画
+            let geometry = new THREE.TubeGeometry(curve, this.segments, 0.015, 8, false);
             
-            let lineMesh = new THREE.Line(geometry, material);
-            
-            // 前のフレームの線を消して新しい線に更新（滑らかに追従させるため）
+            // 既存のメッシュを更新
             if (item.mesh) item.entity.object3D.remove(item.mesh);
-            item.mesh = lineMesh;
-            item.entity.object3D.add(lineMesh);
+            item.mesh = new THREE.Mesh(geometry, item.entity.object3DMap.material);
+            item.entity.object3D.add(item.mesh);
           });
         }
       }
@@ -75,21 +79,27 @@
   </script>
 </head>
 <body style="margin: 0; overflow: hidden;">
-  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
-    <!-- N極用マーカー (Hiro) -->
+  <!-- 【遠近感修正】fog（霧）を追加して、奥を薄く見せる設定 -->
+  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" fog="type: exponential; color: white; density: 0.15">
+    
+    <!-- N極マーカー（Hiro） -->
     <a-marker id="n-pole" preset="hiro">
       <a-sphere radius="0.1" color="red"></a-sphere>
       <a-text value="N" position="0 0.2 0" align="center" color="white"></a-text>
     </a-marker>
 
-    <!-- S極用マーカー (Kanji) -->
+    <!-- S極マーカー（Kanji） -->
     <a-marker id="s-pole" preset="kanji">
       <a-sphere radius="0.1" color="blue"></a-sphere>
       <a-text value="S" position="0 0.2 0" align="center" color="white"></a-text>
     </a-marker>
 
-    <!-- 磁力線を空間に配置 -->
+    <!-- 磁力線のコンテナ -->
     <a-entity magnetic-field id="lines-container"></a-entity>
+    
+    <!-- 【遠近感修正】ライトを追加して立体感を強調 -->
+    <a-entity ambient-light="color: #666"></a-entity>
+    <a-entity directional-light="color: #fff; intensity: 0.6" position="0 1 1"></a-entity>
 
     <a-entity camera></a-entity>
   </a-scene>
